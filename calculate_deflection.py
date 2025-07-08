@@ -132,6 +132,36 @@ def get_point_cloud(df, ref_heights):
     
     return pcd
 
+def apply_colors_improved(pcd, displacement_magnitudes, valid_matches=None):
+    if valid_matches is None:
+        valid_matches = np.ones(len(displacement_magnitudes), dtype=bool)
+    
+    # Only use valid displacements for normalization
+    valid_displacements = displacement_magnitudes[valid_matches]
+    
+    if len(valid_displacements) == 0:
+        return pcd
+    
+    # Use percentiles for more robust normalization
+    vmin = np.percentile(valid_displacements, 5)  # 5th percentile
+    vmax = np.percentile(valid_displacements, 95)  # 95th percentile
+    
+    # Ensure we have some range
+    if vmax - vmin < 1e-6:
+        vmax = vmin + 1e-6
+    
+    norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
+    colormap = cm.viridis
+    
+    # Initialize all colors to black
+    colors = np.zeros((len(displacement_magnitudes), 3))
+    
+    # Color only valid points
+    colors[valid_matches] = colormap(norm(valid_displacements))[:, :3]
+    
+    pcd.colors = o3d.utility.Vector3dVector(colors)
+    return pcd
+
 def measure_displacement(undeformed_pcd, deformed_pcd):
     # Convert point clouds to NumPy arrays
     undeformed_points = np.asarray(undeformed_pcd.points)
@@ -154,21 +184,68 @@ def measure_displacement(undeformed_pcd, deformed_pcd):
     colormap = cm.viridis
     colors = colormap(norm(displacement_magnitudes))[:, :3]  # RGB only
     
-    # Assign colors to the deformed point cloud
-    deformed_pcd.colors = o3d.utility.Vector3dVector(colors)    
+    # # Assign colors to the deformed point cloud
+    # deformed_pcd.colors = o3d.utility.Vector3dVector(colors)    
+    apply_colors_improved(deformed_pcd, displacement_magnitudes)
     
     # Print summary statistics
     print(f"Max displacement: {np.max(displacement_magnitudes):.2f}")
     print(f"Min displacement: {np.min(displacement_magnitudes):.2f}")
     print(f"Average displacement: {np.mean(displacement_magnitudes):.2f}")
+    print(f"Displacement range: {np.min(displacement_magnitudes):.6f} to {np.max(displacement_magnitudes):.6f}")
+    print(f"Displacement std: {np.std(displacement_magnitudes):.6f}")
     
     return displacement_magnitudes, deformed_pcd
 
+def measure_displacement_fixed(undeformed_pcd, deformed_pcd):
+    undeformed_points = np.asarray(undeformed_pcd.points)
+    deformed_points = np.asarray(deformed_pcd.points)
+    
+    tree = KDTree(deformed_points)
+    distances, indices = tree.query(undeformed_points)
+    
+    displacements = deformed_points[indices] - undeformed_points
+    displacement_magnitudes = np.linalg.norm(displacements, axis=1)
+    
+    # Color the UNDEFORMED point cloud instead
+    norm = mcolors.Normalize(vmin=np.min(displacement_magnitudes), vmax=np.max(displacement_magnitudes))
+    colormap = cm.viridis
+    colors = colormap(norm(displacement_magnitudes))[:, :3]
+    
+    undeformed_pcd.colors = o3d.utility.Vector3dVector(colors)  # Changed this line
+    
+    return displacement_magnitudes, undeformed_pcd  # Return undeformed with colors
+
+
+def visualize_with_colorbar(pcd, displacement_magnitudes, title="Point Cloud with Displacement"):
+    """Create a matplotlib 3D plot with colorbar"""
+    points = np.asarray(pcd.points)
+    
+    fig = plt.figure(figsize=(12, 8))
+    ax = fig.add_subplot(111, projection='3d')
+    
+    # Create scatter plot
+    scatter = ax.scatter(points[:, 0], points[:, 1], points[:, 2], 
+                        c=displacement_magnitudes, cmap='viridis', 
+                        s=1, alpha=0.8)
+    
+    # Add colorbar
+    cbar = plt.colorbar(scatter, ax=ax, shrink=0.5, aspect=20)
+    cbar.set_label('Displacement (mm)', rotation=270, labelpad=15)
+    
+    ax.set_xlabel('X (mm)')
+    ax.set_ylabel('Y (mm)')
+    ax.set_zlabel('Z (mm)')
+    ax.set_title(title)
+    
+    plt.show()
 
 # unloaded_csv = "unloaded.csv"
 # loaded_csv = "loaded.csv"
-unloaded_csv = "Point cloud test - unloaded.csv"
-loaded_csv = "Point cloud test - loaded.csv"
+# unloaded_csv = "Point cloud test - unloaded.csv"
+# loaded_csv = "Point cloud test - loaded.csv"
+unloaded_csv = "point cloud test 2 - initial.csv"
+loaded_csv = "point cloud test 2 - deflected.csv"
 
 df_unloaded = pd.read_csv(unloaded_csv)
 df_loaded = pd.read_csv(loaded_csv)
@@ -180,7 +257,10 @@ ref_heights = [6, 18, 30, 42, 54]
 pcd_unloaded = get_point_cloud(df_unloaded, ref_heights)
 pcd_loaded = get_point_cloud(df_loaded, ref_heights)
 
-displacement_magnitudes, colored_pcd = measure_displacement(pcd_unloaded, pcd_loaded)
+displacement_magnitudes, colored_pcd = measure_displacement_fixed(pcd_unloaded, pcd_loaded)
+# displacement_magnitudes, colored_pcd = measure_displacement(pcd_unloaded, pcd_loaded)
+
+visualize_with_colorbar(colored_pcd, displacement_magnitudes)
 
 o3d.visualization.draw_geometries([colored_pcd],
                                    window_name="Deformed Point Cloud - Colored by Displacement",)
