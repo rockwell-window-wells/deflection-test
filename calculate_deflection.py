@@ -54,9 +54,78 @@ def calculate_points(df, ref_heights):
             points.append(point)
             
     return points
+
+def transform_point_angle_data(df):
+    """
+    Transforms a DataFrame with 8 pairs of Point/Angle columns and associated metadata
+    into a long-form DataFrame with one Point and one Angle column.
+    
+    Parameters:
+    - df (pd.DataFrame): Original DataFrame with columns:
+        ['Date', 'Time', 'Sensor', 'Point 1', 'Angle 1', ..., 'Point 8', 'Angle 8']
+        
+    Returns:
+    - pd.DataFrame: Transformed long-form DataFrame with columns:
+        ['Date', 'Time', 'Sensor', 'Point', 'Angle']
+    """
+    # List to hold the transformed rows
+    transformed_rows = []
+
+    # Iterate over each row of the original dataframe
+    for _, row in df.iterrows():
+        for i in range(1, 9):
+            point = row[f'Point {i}']
+            angle = row[f'Angle {i}']
+            transformed_rows.append({
+                'Date': row['Date'],
+                'Time': row['Time'],
+                'Sensor': row['Sensor'],
+                'Distance (mm)': point,
+                'Angle (deg)': angle
+            })
+
+    # Create a new DataFrame from the transformed rows
+    new_df = pd.DataFrame(transformed_rows)
+    return new_df
+
+def get_points_from_df(df, ref_heights):
+    df_new = transform_point_angle_data(df)
+    
+    columns = list(df_new.columns)
+    
+    points = []
+    
+    for i, row in df_new.iterrows():
+        sensor_num = row['Sensor']
+        ref_point = np.array([0, 0, ref_heights[int(sensor_num)]])
+        angle = np.radians(row['Angle (deg)'])
+        distance = row['Distance (mm)']
+        point = calculate_point(angle, distance, ref_point)
+        points.append(point)
+        
+        
+    # for col in columns:
+    #     if col == "Angle (deg)":
+    #         continue
+        
+    #     for char in col:
+    #         if char.isdigit():
+    #             sensor_num = int(char)
+    #             break
+    #     ref_point = np.array([0, 0, ref_heights[sensor_num]])
+        
+    #     for i, row in df.iterrows():
+    #         angle = np.radians(row['Angle (deg)'])
+    #         distance = row[col]
+    #         point = calculate_point(angle, distance, ref_point)
+    #         points.append(point)
+            
+    return points
+    
     
 def get_point_cloud(df, ref_heights):
-    points = calculate_points(df, ref_heights)
+    # points = calculate_points(df, ref_heights)
+    points = get_points_from_df(df, ref_heights)
     
     pcd = o3d.geometry.PointCloud()
     pcd.points = o3d.utility.Vector3dVector(points)
@@ -96,8 +165,10 @@ def measure_displacement(undeformed_pcd, deformed_pcd):
     return displacement_magnitudes, deformed_pcd
 
 
-unloaded_csv = "unloaded.csv"
-loaded_csv = "loaded.csv"
+# unloaded_csv = "unloaded.csv"
+# loaded_csv = "loaded.csv"
+unloaded_csv = "Point cloud test - unloaded.csv"
+loaded_csv = "Point cloud test - loaded.csv"
 
 df_unloaded = pd.read_csv(unloaded_csv)
 df_loaded = pd.read_csv(loaded_csv)
@@ -112,7 +183,7 @@ pcd_loaded = get_point_cloud(df_loaded, ref_heights)
 displacement_magnitudes, colored_pcd = measure_displacement(pcd_unloaded, pcd_loaded)
 
 o3d.visualization.draw_geometries([colored_pcd],
-                                  window_name="Deformed Point Cloud - Colored by Displacement",)
+                                   window_name="Deformed Point Cloud - Colored by Displacement",)
 
 # # Visualize the point cloud
-# o3d.visualization.draw_geometries([pcd])
+# o3d.visualization.draw_geometries([pcd_unloaded])
